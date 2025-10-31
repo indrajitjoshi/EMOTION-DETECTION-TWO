@@ -19,8 +19,8 @@ MAX_WORDS = 20000 # Max number of words to keep in the vocabulary
 MAX_LEN = 100     # Max length of a sequence (review)
 EMBEDDING_DIM = 100 # Dimension of the word embeddings
 NUM_CLASSES = 6
-# Increased for better accuracy on minority classes (like 'love')
-EPOCHS = 20 
+# Reduced for faster training time and reliable Streamlit deployment
+EPOCHS = 8 
 
 # Define the emotion labels for mapping
 emotion_labels = ['sadness', 'joy', 'love', 'anger', 'fear', 'surprise']
