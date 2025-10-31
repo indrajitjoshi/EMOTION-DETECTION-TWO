@@ -19,7 +19,7 @@ MAX_WORDS = 20000 # Max number of words to keep in the vocabulary
 MAX_LEN = 100     # Max length of a sequence (review)
 EMBEDDING_DIM = 100 # Dimension of the word embeddings
 NUM_CLASSES = 6
-# Reduced for faster training time and reliable Streamlit deployment
+# Adjusted to 8 epochs for better accuracy while maintaining deployment stability
 EPOCHS = 8 
 
 # Define the emotion labels for mapping
@@ -47,7 +47,7 @@ def build_bilstm_model():
     """Builds a standalone Bi-directional LSTM model."""
     model = Sequential([
         Embedding(MAX_WORDS, EMBEDDING_DIM, input_length=MAX_LEN),
-        Bidirectional(LSTM(128, return_sequences=True)),
+        Bidirectional(LSTM(64, return_sequences=True)), # Reduced units from 128 to 64
         Dropout(0.3),
         Bidirectional(LSTM(64)),
         Dropout(0.5),
