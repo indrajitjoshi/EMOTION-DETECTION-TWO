@@ -1,0 +1,11 @@
+streamlit
+
+numpy
+
+pandas
+
+tensorflow
+
+datasets
+
+scikit-learn
