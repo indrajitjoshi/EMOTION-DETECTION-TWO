@@ -7,7 +7,7 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Embedding, Bidirectional, LSTM, Dense, Dropout
+from tensorflow.keras.layers import Embedding, Bidirectional, LSTM, Dense, Dropout, Conv1D, GlobalMaxPooling1D, GRU
 import os
 
 # Suppress TensorFlow logging messages and warnings
@@ -18,7 +18,7 @@ import tensorflow as tf
 MAX_WORDS = 20000 # Max number of words to keep in the vocabulary
 MAX_LEN = 100     # Max length of a sequence (review)
 EMBEDDING_DIM = 100 # Dimension of the word embeddings
-LSTM_UNITS = 150  # MAXIMIZED CAPACITY (Increased from 128)
+LSTM_UNITS = 150  # MAXIMIZED CAPACITY
 NUM_CLASSES = 6
 EPOCHS = 30 # Max training epochs for highest accuracy potential
 
@@ -37,18 +37,42 @@ SAMPLE_REVIEWS = {
     "surprise": "Unbelievable! I was totally shocked by how quickly it arrived and how amazing it is. What a surprise!"
 }
 
-# --- Model Building Function ---
+# --- Ensemble Model Building Functions ---
 
-def build_bilstm_model():
-    """Builds the powerful single BiLSTM model with maximized capacity."""
+def build_cnn_bilstm_model():
+    """Builds the Hybrid CNN-BiLSTM model."""
+    model = Sequential([
+        Embedding(MAX_WORDS, EMBEDDING_DIM, input_length=MAX_LEN),
+        Conv1D(filters=128, kernel_size=5, activation='relu'), 
+        GlobalMaxPooling1D(),
+        Dense(150, activation='relu'),
+        Dropout(0.5),
+        Dense(NUM_CLASSES, activation='softmax')
+    ])
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    return model
+
+def build_bilstm_model_v2():
+    """Builds the pure BiLSTM model (version 2)."""
     model = Sequential([
         Embedding(MAX_WORDS, EMBEDDING_DIM, input_length=MAX_LEN),
         Dropout(0.3),
-        # Increased units for primary LSTM layer
         Bidirectional(LSTM(LSTM_UNITS, return_sequences=True)),
         Bidirectional(LSTM(LSTM_UNITS // 2)),
-        # Increased units for final Dense layer
-        Dense(150, activation='relu'), 
+        Dense(150, activation='relu'),
+        Dropout(0.5),
+        Dense(NUM_CLASSES, activation='softmax')
+    ])
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    return model
+
+def build_gru_model():
+    """Builds the Bidirectional GRU model."""
+    model = Sequential([
+        Embedding(MAX_WORDS, EMBEDDING_DIM, input_length=MAX_LEN),
+        Dropout(0.3),
+        Bidirectional(GRU(LSTM_UNITS)),
+        Dense(150, activation='relu'),
         Dropout(0.5),
         Dense(NUM_CLASSES, activation='softmax')
     ])
@@ -60,7 +84,7 @@ def build_bilstm_model():
 
 @st.cache_resource
 def load_and_train_model():
-    """Loads data, trains the single BiLSTM model, and evaluates it."""
+    """Loads data, trains the Ensemble of three models, and evaluates them using soft voting."""
     
     # 1. Load Data
     data = load_dataset("dair-ai/emotion", "split")
@@ -86,28 +110,37 @@ def load_and_train_model():
     # Convert labels to one-hot encoding
     train_labels_one_hot = tf.keras.utils.to_categorical(train_labels, num_classes=NUM_CLASSES)
     
-    # 3. Build and Train Model
-    model = build_bilstm_model()
+    # 3. Build and Train Ensemble Models
+    
+    models = [
+        build_cnn_bilstm_model(),
+        build_bilstm_model_v2(),
+        build_gru_model()
+    ]
 
-    # Train model silently
-    model.fit(
-        train_padded, 
-        train_labels_one_hot,
-        epochs=EPOCHS, 
-        batch_size=32,
-        validation_split=0.1,
-        verbose=0 # Run silently
-    )
-
-    # 4. Prediction and Evaluation
+    # Train all models silently for maximum accuracy
+    for model in models:
+        model.fit(
+            train_padded, 
+            train_labels_one_hot,
+            epochs=EPOCHS, 
+            batch_size=32,
+            validation_split=0.1,
+            verbose=0 # Run silently
+        )
     
-    # Get predictions (probabilities)
-    y_pred_probs = model.predict(test_padded, verbose=0)
+    # 4. Ensemble Prediction and Evaluation
     
-    # Final prediction
-    y_pred = np.argmax(y_pred_probs, axis=1)
+    # Get predictions (probabilities) from all models
+    pred_probs_list = [model.predict(test_padded, verbose=0) for model in models]
     
-    # Calculate Metrics
+    # Soft Voting: Average the probabilities across all models
+    ensemble_probs = np.mean(pred_probs_list, axis=0)
+    
+    # Final prediction based on ensemble average
+    y_pred = np.argmax(ensemble_probs, axis=1)
+    
+    # Calculate Metrics based on ensemble prediction
     accuracy = accuracy_score(test_labels, y_pred)
     precision, recall, f1, _ = precision_recall_fscore_support(
         test_labels, y_pred, average='macro', zero_division=0
@@ -120,26 +153,29 @@ def load_and_train_model():
         'f1_score': f1
     }
 
-    return model, tokenizer, metrics
+    return models, tokenizer, metrics
 
 
 # --- Prediction Function ---
-def predict_emotion(model, tokenizer, text):
-    """Predicts the emotion of a given review text."""
+def predict_emotion(ensemble_models, tokenizer, text):
+    """Predicts the emotion of a given review text using the ensemble models (Soft Voting)."""
     sequence = tokenizer.texts_to_sequences([text])
     padded_sequence = pad_sequences(sequence, maxlen=MAX_LEN, padding='post', truncating='post')
     
-    # Make prediction
-    prediction = model.predict(padded_sequence, verbose=0)[0]
+    # Get predictions (probabilities) from all models
+    pred_probs_list = [model.predict(padded_sequence, verbose=0) for model in ensemble_models]
+    
+    # Soft Voting: Average the probabilities across all models
+    ensemble_prediction = np.mean(pred_probs_list, axis=0)[0] # [0] for single input batch
     
     # Get the index of the highest probability
-    predicted_id = np.argmax(prediction)
+    predicted_id = np.argmax(ensemble_prediction)
     predicted_label = id_to_label[predicted_id].capitalize()
     
     # Format data for bar chart
     prob_data = pd.DataFrame({
         'Emotion': [label.capitalize() for label in emotion_labels],
-        'Confidence': prediction
+        'Confidence': ensemble_prediction
     }).set_index('Emotion')
 
     return predicted_label, prob_data
@@ -321,7 +357,7 @@ def main():
     display_metric(col3, "Macro Recall", metrics['recall'])
     display_metric(col4, "Macro F1-Score", metrics['f1_score'])
 
-    TARGET_ACCURACY = 0.94 # Target set to 94%
+    TARGET_ACCURACY = 0.95 # Target set to 95%
     
     if metrics['accuracy'] >= TARGET_ACCURACY:
         st.success(f"✅ Target Accuracy of {TARGET_ACCURACY*100:.0f}% Achieved! Current Accuracy: {metrics['accuracy']:.4f}")
@@ -330,5 +366,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
 
 
