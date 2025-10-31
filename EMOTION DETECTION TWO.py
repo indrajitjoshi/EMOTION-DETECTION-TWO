@@ -10,7 +10,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Embedding, Bidirectional, LSTM, GRU, Dense, Dropout, Conv1D, MaxPooling1D
 import os
 
-# Suppress TensorFlow logging messages
+# Suppress TensorFlow logging messages and warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
 
@@ -19,7 +19,8 @@ MAX_WORDS = 20000 # Max number of words to keep in the vocabulary
 MAX_LEN = 100     # Max length of a sequence (review)
 EMBEDDING_DIM = 100 # Dimension of the word embeddings
 NUM_CLASSES = 6
-EPOCHS = 15 # Increased for higher accuracy with Ensemble, expects longer initial load (15-25 minutes)
+# Increased for better accuracy on minority classes (like 'love')
+EPOCHS = 20 
 
 # Define the emotion labels for mapping
 emotion_labels = ['sadness', 'joy', 'love', 'anger', 'fear', 'surprise']
@@ -70,7 +71,7 @@ def build_gru_model():
 
 
 # --- Caching function to load data and train the ensemble once ---
-# No explicit 'show_spinner' to avoid displaying the message, Streamlit will show its default 'Running...'
+# Removed all st.warning/st.info/st.success calls to suppress training log messages
 @st.cache_resource
 def load_and_train_ensemble():
     """Loads data, trains the three models, and prepares the ensemble."""
@@ -105,20 +106,16 @@ def load_and_train_ensemble():
         'GRU': build_gru_model()
     }
 
-    st.warning("Starting Ensemble Training (CNN-BiLSTM, BiLSTM, GRU). This will take 15-25 minutes to complete on first run.")
-    
-    # Train all models
-    for name, model in models.items():
-        st.info(f"Training {name}...")
+    # Train all models silently
+    for model in models.values():
         model.fit(
             train_padded, 
             train_labels_one_hot,
             epochs=EPOCHS, 
             batch_size=32,
             validation_split=0.1,
-            verbose=0 # Run silently in Streamlit
+            verbose=0 # Run silently
         )
-    st.success("All models trained successfully!")
 
     # 4. Ensemble Prediction and Evaluation
     
@@ -146,7 +143,7 @@ def load_and_train_ensemble():
         'f1_score': f1
     }
 
-    return models, tokenizer, metrics, train_padded, test_padded, test_labels
+    return models, tokenizer, metrics
 
 
 # --- Prediction Function for Ensemble ---
@@ -179,23 +176,30 @@ def predict_emotion_ensemble(models, tokenizer, text):
 # --- Main Streamlit App ---
 def main():
     
-    # --- CSS Injection for Engaging Background and Hover Effects ---
+    # --- CSS Injection for Engaging Background and Improved Visibility ---
     st.markdown(
         """
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
         
-        /* Animated Gradient Background */
+        /* Animated Gradient Background - DARKER COLORS FOR BETTER CONTRAST */
         .stApp {
             font-family: 'Poppins', sans-serif;
-            background: linear-gradient(-45deg, #1e004a, #5b1076, #004a60, #00707a);
+            color: #FFFFFF; /* Ensures main text is white */
+            background: linear-gradient(-45deg, #0f002a, #2b0846, #002a3a, #00404a); 
             background-size: 400% 400%;
-            animation: gradientBG 20s ease infinite;
+            animation: gradientBG 25s ease infinite; /* Slower animation */
         }
         @keyframes gradientBG {
             0% { background-position: 0% 50%; }
             50% { background-position: 100% 50%; }
             100% { background-position: 0% 50%; }
+        }
+
+        /* All Text and Headers are Lighter */
+        h1, h2, h3, h4, .st-emotion-cache-12fm1f5, .st-emotion-cache-79elbk {
+            color: #FFFFFF !important; /* Pure white headers */
+            letter-spacing: 1.2px;
         }
 
         /* Header Styling */
@@ -204,47 +208,56 @@ def main():
             text-align: center;
             padding: 15px;
             border-radius: 12px;
-            background: rgba(255, 255, 255, 0.1);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            background: rgba(255, 255, 255, 0.05); /* Very light, transparent background */
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
             margin-bottom: 25px;
-            letter-spacing: 1.5px;
-        }
-        h1, h2, h3, h4, .stSidebar h2 {
-            color: #FFD700; /* Gold/Yellow for contrast */
         }
         
         /* Primary Button Hover Effect */
         .stButton>button {
-            border-radius: 8px;
+            border-radius: 10px;
             transition: all 0.3s ease;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+            color: white;
+            background-color: #5b1076; /* Darker primary button */
         }
         .stButton>button:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
-            background-color: #00707a; 
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.6);
+            background-color: #7b1296; 
         }
 
         /* Text Area Focus/Hover */
         .stTextArea textarea {
-            border: 2px solid #5b1076;
+            background-color: rgba(255, 255, 255, 0.05);
+            color: white;
+            border: 1px solid #7b1296;
             transition: border 0.3s ease;
         }
         .stTextArea textarea:focus {
-            border: 2px solid #FFD700;
+            border: 2px solid #FFD700; /* Light yellow focus */
             box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
         }
 
-        /* Metrics boxes (sidebar) */
-        [data-testid="stMetric"] {
+        /* Metric Boxes Styling */
+        .metric-box {
             background-color: rgba(255, 255, 255, 0.1);
             border-radius: 10px;
-            padding: 10px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-            transition: transform 0.2s ease;
+            padding: 15px;
+            box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+            margin-bottom: 15px;
+            text-align: center;
+            color: white;
         }
-        [data-testid="stMetric"]:hover {
-            transform: scale(1.03);
+        .metric-label {
+            font-size: 1rem;
+            opacity: 0.7;
+            margin-bottom: 5px;
+        }
+        .metric-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #FFD700; /* Gold value */
         }
         </style>
         """,
@@ -255,26 +268,8 @@ def main():
     st.markdown("<h3 style='color: white;'>Hybrid CNN-BiLSTM, BiLSTM, and GRU Ensemble Analysis</h3>", unsafe_allow_html=True)
     
     # Load and train the ensemble (cached)
-    models, tokenizer, metrics, _, _, _ = load_and_train_ensemble()
+    models, tokenizer, metrics = load_and_train_ensemble()
 
-    # --- Metrics Display (Sidebar) ---
-    st.sidebar.markdown("<h2 style='color: #FFD700;'>Ensemble Performance</h2>", unsafe_allow_html=True)
-    st.sidebar.markdown(f"**Architecture:** Soft-Voting Ensemble (Trained for {EPOCHS} Epochs)")
-    
-    # Display metrics in columns
-    col1, col2 = st.sidebar.columns(2)
-    col1.metric("Accuracy", f"{metrics['accuracy']:.4f}")
-    col2.metric("Macro F1-Score", f"{metrics['f1_score']:.4f}")
-    
-    col3, col4 = st.sidebar.columns(2)
-    col3.metric("Macro Precision", f"{metrics['precision']:.4f}")
-    col4.metric("Macro Recall", f"{metrics['recall']:.4f}")
-
-    if metrics['accuracy'] >= 0.85:
-        st.sidebar.success(f"✅ Target Accuracy of 85% Achieved!")
-    else:
-        st.sidebar.warning(f"⚠️ Target Accuracy of 85% Not Met Yet.")
-    
     # --- Input Section ---
     st.markdown("<h3 style='color: white;'>Enter a Product Review:</h3>", unsafe_allow_html=True)
     user_input = st.text_area("Review Text", 
@@ -283,12 +278,13 @@ def main():
     
     if st.button("Detect Emotion", use_container_width=True, type="primary"):
         if user_input:
+            # Predict
             predicted_emotion, prob_data = predict_emotion_ensemble(models, tokenizer, user_input)
             
-            st.markdown("<hr style='border: 1px solid white;'>", unsafe_allow_html=True)
+            st.markdown("<hr style='border: 1px solid #7b1296;'>", unsafe_allow_html=True)
             
             # Display Prediction
-            st.markdown(f"<h2 style='color: #FFD700;'>Predicted Emotion: <span style='background-color: #5b1076; padding: 8px 15px; border-radius: 8px; color: white;'>{predicted_emotion}</span></h2>", unsafe_allow_html=True)
+            st.markdown(f"<h2 style='color: #FFD700;'>Predicted Emotion: <span style='background-color: #5b1076; padding: 10px 20px; border-radius: 10px; color: white;'>{predicted_emotion}</span></h2>", unsafe_allow_html=True)
             
             # Display Confidence Breakdown
             st.markdown("<h3 style='color: white;'>Confidence Breakdown:</h3>", unsafe_allow_html=True)
@@ -296,8 +292,7 @@ def main():
             # Use Pandas DataFrame index for chart labels
             st.bar_chart(prob_data, use_container_width=True)
             
-            st.markdown("<hr style='border: 1px solid white;'>", unsafe_allow_html=True)
-
+            st.markdown("<hr style='border: 1px solid #7b1296;'>", unsafe_allow_html=True)
 
     # --- Sample Reviews Section (Designed for High Confidence) ---
     st.markdown("<h3 style='color: white;'>Example Reviews to Test (Optimized for Ensemble Prediction):</h3>", unsafe_allow_html=True)
@@ -305,17 +300,42 @@ def main():
     sample_data = {
         'Emotion': ['Joy', 'Sadness', 'Anger', 'Fear', 'Love', 'Surprise'],
         'Review': [
-            "This product is absolutely wonderful and makes me feel pure bliss and delight! I am ecstatic!",
-            "I feel utterly heartbroken, devastated, and miserable. This outcome is a crushing disappointment.",
-            "I am incredibly furious, this is totally unacceptable! I want to throw my computer in utter rage!",
-            "My heart is pounding, I'm absolutely terrified of this result, a wave of panic is washing over me.",
-            "I have deep affection and a profound devotion for this brand. I truly love this item.",
-            "I am completely astonished! I never expected this result; it's the most amazing revelation!"
+            "This product is absolutely wonderful and makes me feel pure bliss and delight! I am ecstatic and thrilled!",
+            "I feel utterly heartbroken, devastated, and miserable. This outcome is a crushing disappointment, my soul is low.",
+            "I am incredibly furious, this is totally unacceptable! I want to throw my computer in utter rage and hatred!",
+            "My heart is pounding, I'm absolutely terrified of this result, a wave of panic is washing over me. I am paralyzed with fright.",
+            "I have deep affection and a profound devotion for this brand. I truly cherish and love this item, it means the world to me.",
+            "I am completely astonished! I never expected this result; it's the most amazing revelation and a sudden wonder!"
         ]
     }
     sample_df = pd.DataFrame(sample_data)
     st.table(sample_df)
 
+    # --- Evaluation Metrics Display (Moved to Bottom) ---
+    st.markdown("---")
+    st.markdown("<h2 style='color: #FFD700; text-align: center;'>Ensemble Model Evaluation Metrics</h2>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align: center; color: white;'>Architecture: Soft-Voting Ensemble trained for {EPOCHS} Epochs.</p>", unsafe_allow_html=True)
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    # Function to display metric in custom style
+    def display_metric(col, label, value):
+        col.markdown(f"""
+            <div class="metric-box">
+                <div class="metric-label">{label}</div>
+                <div class="metric-value">{value:.4f}</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    display_metric(col1, "Accuracy", metrics['accuracy'])
+    display_metric(col2, "Macro Precision", metrics['precision'])
+    display_metric(col3, "Macro Recall", metrics['recall'])
+    display_metric(col4, "Macro F1-Score", metrics['f1_score'])
+
+    if metrics['accuracy'] >= 0.85:
+        st.success(f"✅ Target Accuracy of 85% Achieved! Current Accuracy: {metrics['accuracy']:.4f}")
+    else:
+        st.warning(f"⚠️ Target Accuracy of 85% Not Met Yet. Current Accuracy: {metrics['accuracy']:.4f}")
 
 if __name__ == "__main__":
     main()
